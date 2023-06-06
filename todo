@@ -1,0 +1,240 @@
+#!/usr/bin/python3
+import pickle
+import argparse
+
+class Task:
+    def __init__(self, name: str):
+        self.name = name
+        self.parent = None
+        self.is_done = False
+        self.subtasks = []
+        self.due = []
+
+    def __lt__(self, other):
+        if self.is_done != other.is_done:
+            return other.is_done
+        if self.due != other.due:
+            if self.due and other.due:
+                return self.due < other.due
+            return self.due
+        return self.name.lower() < other.name.lower()
+
+    def add_subtask(self, new_subtask):
+        for _ in self.subtasks:
+            if _.name == new_subtask.name:
+                print("Subtask with this name already exists.")
+                return
+        self.subtasks.append(new_subtask)
+        new_subtask.parent = self
+        self.update_completion()
+
+    def change_name(self, root_list, new_name):
+        if self.parent:
+            neighbors = self.parent.subtasks
+        else:
+            neighbors = root_list
+        for _ in neighbors:
+            if _.name == new_name:
+                print("Task with this name already exists.")
+                return
+        self.name = new_name
+
+    def set_completion(self, completion: bool):
+        self.is_done = completion
+        for subtask in self.subtasks:
+            subtask.set_completion(completion)
+        if self.parent:
+            self.parent.update_completion()
+
+    def update_completion(self):
+        self.is_done = True
+        for _ in self.subtasks:
+            if not _.is_done:
+                self.is_done = False
+                break
+        if self.parent:
+            self.parent.update_completion()
+
+    def get_completion(self):
+        if not self.subtasks:
+            return int(self.is_done), 1
+        done = 0
+        for _ in self.subtasks:
+            done += _.is_done
+        return done, len(self.subtasks)
+
+    def set_due_date(self, date: str):
+        d, m, y = date.split(".")
+        self.due = [int(y), int(m), int(d)]
+
+    def show(self, recursion_level: int = 0):
+        d, s = self.get_completion()
+        color = 32 if self.is_done else 31 if not d else 33
+        date = f" ({self.due[2]}. {self.due[1]}. {self.due[0]})" if self.due else ""
+        print(f"\033[38;2;128;128;128m{recursion_level*'· '}"
+              f"\033[1;{color}m{self.name}\033[0;{color}m{date}:\033[0m {d}/{s}")
+        for subtask in sorted(self.subtasks):
+            subtask.show(recursion_level+1)
+
+
+def navigate(root_list, path: list):
+    c = None
+    for task in root_list:
+        if task.name == path[0]:
+            c = task
+    if c is None:
+        print("Task does not exist.")
+        return
+    for name in path[1:]:
+        found = False
+        for task in c.subtasks:
+            if task.name == name:
+                c = task
+                found = True
+        if not found:
+            print("Task does not exist.")
+            return
+    return c
+
+
+def add_task(root_list, name):
+    if "/" in name:
+        parent = navigate(root_list, name.split("/")[:-1])
+        if parent is not None:
+            parent.add_subtask(Task(name.split("/")[-1]))
+        return
+    for _ in root_list:
+        if _.name == name:
+            print("Task with this name already exists.")
+            return
+    root_list.append(Task(name))
+
+
+def set_completion(root_list, name, completion):
+    task = navigate(root_list, name.split("/"))
+    if task is not None:
+        task.set_completion(completion)
+
+
+def change_name(root_list, name, new_name):
+    task = navigate(root_list, name.split("/"))
+    if task is not None:
+        task.change_name(root_list, new_name)
+
+
+def remove_task(root_list, name):
+    task = navigate(root_list, name.split("/"))
+    if task is None:
+        return
+    if "/" in name:
+        parent = navigate(root_list, name.split("/")[:-1])
+        if parent is None:
+            return
+        parent.subtasks.remove(task)
+        return
+    root_list.remove(task)
+    
+
+def set_due_date(root_list, name, date):
+    task = navigate(root_list, name.split("/"))
+    if task is not None:
+        task.set_due_date(date)
+
+
+def show(root_list, name):
+    task = navigate(root_list, name.split("/"))
+    if task is not None:
+        task.show()
+
+
+def move_task(root_list, name, new_parent):
+    task = navigate(root_list, name.split("/"))
+    if task is None:
+        return
+    if new_parent == "ø":
+        task.parent.subtasks.remove(task)
+        task.parent = None
+        root_list.append(task)
+        return
+    parent = navigate(root_list, new_parent.split("/"))
+    if parent is None:
+        return
+    if task in root_list:
+        root_list.remove(task)
+    else:
+        task.parent.subtasks.remove(task)
+    parent.add_subtask(task)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-a", action="store_true", help="add task(s)")
+    parser.add_argument("-c", action="store_true", help="set completion for task(s)")
+    parser.add_argument("-d", action="store_true", help="set due date for task(s)")
+    parser.add_argument("-m", action="store_true", help="move a task to a new parent task")
+    parser.add_argument("-n", action="store_true", help="change name of task")
+    parser.add_argument("-r", action="store_true", help="remove task(s)")
+    parser.add_argument("-s", action="store_true", help="show task(s)")
+    parser.add_argument("-S", action="store_true", help="show all root tasks")
+    parser.add_argument("tasks", nargs="+", type=str, help="task(s) to be updated")
+    parser.add_argument("--date", nargs="?", type=str, help="required for -d")
+    parser.add_argument("--done", action="store_true", help="")
+    parser.add_argument("--name", nargs="?", type=str, help="required for -n")
+    parser.add_argument("--parent", nargs="?", type=str, help="required for -m; use \"ø\" to move task to roots")
+    args = parser.parse_args()
+
+    location = "INSERT_SAVE_FILE_PATH_HERE"
+    try:
+        roots = pickle.load(open(location, "rb"))
+    except FileNotFoundError:
+        print(f"making a save file at {location}")
+        roots = []
+
+
+    if args.n:
+        if len(args.tasks) != 1:
+            parser.error("only one task can be renamed at a time")
+        if args.name is None:
+            parser.error("--name is required to rename task")
+        change_name(roots, args.tasks[0], args.name)
+
+    if args.m:
+        if len(args.tasks) != 1:
+            parser.error("only one task can be moved at a time")
+        if args.parent is None:
+            parser.error("--parent is required to move task")
+        move_task(roots, args.tasks[0], args.parent)
+
+    if args.a:
+        for task in args.tasks:
+            add_task(roots, task)
+
+    if args.d:
+        if args.date is None:
+            parser.error("--date is required to set due date")
+        try:
+            for task in args.tasks:
+                set_due_date(roots, task, args.date)
+        except ValueError:
+            parser.error("date must be in dd.mm.yyyy format")
+
+    if args.c:
+        for task in args.tasks:
+            set_completion(roots, task, True if args.done else False)
+
+    if args.r:
+        for task in args.tasks:
+            remove_task(roots, task)
+
+    if args.S:
+        for task in roots:
+            task.show()
+
+    if args.s:
+        for task in args.tasks:
+            show(roots, task)
+
+    pickle.dump(roots, open(location, "wb"))
+
+if __name__ == "__main__":
+    main()
